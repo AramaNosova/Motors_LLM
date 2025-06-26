@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import aiohttp
+import PyPDF2
 # Для ембеддинга и модели
 
 from KeywordFinder.handlers.llm import LLM
@@ -21,8 +22,7 @@ from pandas import DataFrame
 from langchain_community.document_loaders import DataFrameLoader 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.schema import Document
-
+from langchain.schema import Document, LLM
 import pytesseract
 
 from PIL import Image
@@ -92,7 +92,7 @@ class VectorStore():
 
     def add(self, docs: pd.DataFrame):
         # Создаем документы из ответов, разбивая их на чанки
-        all_documents = []
+        all_documents = [] 
         
         for _, row in docs.iterrows():
             # Разбиваем ответ на предложения
@@ -131,18 +131,75 @@ class VectorStore():
         self.store.save_local(self.name)
 
 
+
+folder_path = 'documents'
+
+def load_documents_from_folder(folder_path):
+    documents = []
+    id_counter = len(documents1) + 1  # Начинаем счетчик с последнего ID в documents1
+
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        print(f"filename: {filename}")
+        print(f"file_path {file_path}")
+        if filename.endswith('.txt'):
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
+                print(f"=== {filename} ===")
+                print(content)
+                print ("=" * 40)
+                documents.append({
+                    "id": id_counter,
+                    "question": filename,
+                    "answer": content,
+                    "url": None,
+                    "image_irl": None
+                })
+                id_counter += 1
+        elif filename.endswith('.pdf'):
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                content = ""
+                for page_num in range(len(reader.pages)):
+                    page = reader.pages[page_num]
+                    content += page.extract_text()
+                documents.append({
+                    "id": id_counter,
+                    "question": filename,
+                    "answer": content,
+                    "url": None,
+                    "image_irl": None
+                })
+                id_counter += 1
+    return documents
+
+new_documents = load_documents_from_folder(folder_path)
+
+def update_knowledge_base(new_documents):
+    global documents1
+    documents1.extend(new_documents)
+    df = pd.DataFrame(documents1)
+    db.add(df)
+
+
+
+
 # Далее ваш код
 
 
 df = pd.DataFrame(all_documents)
 
 
-model = LLM(model="llama3.2:3b", host="127.0.0.1", port=11434)
+model = LLM(model="llama3.2-vision", host="127.0.0.1", port=11434)
 db = VectorStore(embedding_model=model.get_embeding_model())
 
 # Добавляем документы в хранилище
 db.add(df)
 
+if new_documents:
+    update_knowledge_base(new_documents)
+else:
+    print("Нет новых документов для добавления.")
 
 @knowledge_base_router.message(F.text.lower() == "ответ по базе знаний")
 async def menu_cmd(message: types.Message, state:FSMAdmin):
@@ -271,5 +328,6 @@ async def process_message(message: types.Message, state: FSMContext):
 
                     else:
                         await message.answer("Извините, изображение не содержит ответа на ваш вопрос.")
-
+    for doc in documents1:
+        print(doc['question'])
     print ("The End")
